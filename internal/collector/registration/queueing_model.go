@@ -4,6 +4,7 @@ package registration
 
 import (
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/inferenceengine"
 )
 
 // Query name constants for queueing model analyzer metrics.
@@ -76,4 +77,29 @@ func RegisterQueueingModelQueries(sourceRegistry *source.SourceRegistry) {
 	// It is sourced from the Deployment's container args using the deployment parser
 	// (see saturation_v2.ParseVLLMArgs). The collector populates ReplicaMetrics.MaxBatchSize
 	// by parsing the --max-num-seqs flag from the pod's parent Deployment spec.
+
+	registerSGLangQueueingModelQueries(registry)
+}
+
+// registerSGLangQueueingModelQueries registers the SGLang variants of the
+// engine-specific queueing-model queries. The scheduler dispatch-rate query above
+// is engine-agnostic (sourced from EPP) and is not duplicated here.
+func registerSGLangQueueingModelQueries(registry *source.QueryList) {
+	// Average time-to-first-token per instance (seconds), 1m sliding window.
+	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
+		Name:        QueryAvgTTFT,
+		Type:        source.QueryTypePromQL,
+		Template:    `max by (instance, pod, llm_d_ai_variant) (rate(sglang:time_to_first_token_seconds_sum{namespace="{{.namespace}}",model_name="{{.modelID}}"}[1m]) / rate(sglang:time_to_first_token_seconds_count{namespace="{{.namespace}}",model_name="{{.modelID}}"}[1m]))`,
+		Params:      []string{source.ParamNamespace, source.ParamModelID},
+		Description: "Average time-to-first-token per instance (seconds) (SGLang)",
+	})
+
+	// Average inter-token latency per instance (seconds), 1m sliding window.
+	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
+		Name:        QueryAvgITL,
+		Type:        source.QueryTypePromQL,
+		Template:    `max by (instance, pod, llm_d_ai_variant) (rate(sglang:inter_token_latency_seconds_sum{namespace="{{.namespace}}",model_name="{{.modelID}}"}[1m]) / rate(sglang:inter_token_latency_seconds_count{namespace="{{.namespace}}",model_name="{{.modelID}}"}[1m]))`,
+		Params:      []string{source.ParamNamespace, source.ParamModelID},
+		Description: "Average inter-token latency per instance (seconds) (SGLang)",
+	})
 }

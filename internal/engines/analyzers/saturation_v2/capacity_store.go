@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/inferenceengine"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils/scaletarget"
 )
 
@@ -98,7 +99,7 @@ func (s *CapacityKnowledgeStore) LoadFromScaleTarget(namespace, modelID, variant
 		return
 	}
 
-	params := ParseVLLMArgs(scaleTarget)
+	params := ParseEngineArgs(inferenceengine.Detect(scaleTarget), scaleTarget)
 	record := &CapacityRecord{
 		AcceleratorName: accelerator,
 		GpuCount:        gpuCount,
@@ -107,11 +108,14 @@ func (s *CapacityKnowledgeStore) LoadFromScaleTarget(namespace, modelID, variant
 		LearnedAt:       time.Now(),
 	}
 
-	// If num_gpu_blocks_override is set, we can estimate k1
+	// If num_gpu_blocks_override is set (vLLM), we can estimate k1.
 	if params.NumGpuBlocksOverride > 0 {
 		record.NumGpuBlocks = params.NumGpuBlocksOverride
 		record.BlockSize = params.BlockSize
 		record.TotalKvCapacityTokens = params.NumGpuBlocksOverride * params.BlockSize
+	} else if params.TotalKvTokensOverride > 0 {
+		// SGLang exposes total KV token capacity directly via --max-total-tokens.
+		record.TotalKvCapacityTokens = params.TotalKvTokensOverride
 	}
 
 	// Provide a conservative capacity estimate so that brand-new variants

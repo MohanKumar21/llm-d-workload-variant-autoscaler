@@ -68,6 +68,62 @@ const (
 	VLLMPrefixCacheQueries = "vllm:prefix_cache_queries"
 )
 
+// SGLang Input Metrics
+// These metric names are used to query SGLang inference engine metrics from Prometheus.
+// Names and types were taken from SGLang's metrics collector
+// (python/sglang/srt/observability/metrics_collector.py). SGLang labels its metrics
+// with model_name, matching the label WVA filters on. See docs/proposals/sglang-backend.md.
+const (
+	// SGLangNumRunningReqs is the number of running requests (gauge).
+	// SGLang equivalent of vllm:num_requests_running.
+	SGLangNumRunningReqs = "sglang:num_running_reqs"
+
+	// SGLangNumQueueReqs is the number of requests in the waiting queue (gauge).
+	// SGLang equivalent of vllm:num_requests_waiting.
+	SGLangNumQueueReqs = "sglang:num_queue_reqs"
+
+	// SGLangTokenUsage is the KV-cache token-pool utilization as a fraction 0.0-1.0 (gauge).
+	// SGLang equivalent of vllm:kv_cache_usage_perc.
+	SGLangTokenUsage = "sglang:token_usage"
+
+	// SGLangMaxTotalNumTokens is the total KV-cache token capacity (gauge).
+	// SGLang exposes capacity directly, unlike vLLM which derives it from
+	// vllm:cache_config_info (num_gpu_blocks x block_size).
+	SGLangMaxTotalNumTokens = "sglang:max_total_num_tokens"
+
+	// SGLangTimeToFirstTokenSecondsSum/Count are the TTFT histogram parts.
+	// SGLang equivalent of vllm:time_to_first_token_seconds_{sum,count}.
+	SGLangTimeToFirstTokenSecondsSum   = "sglang:time_to_first_token_seconds_sum"
+	SGLangTimeToFirstTokenSecondsCount = "sglang:time_to_first_token_seconds_count"
+
+	// SGLangInterTokenLatencySecondsSum/Count are the inter-token-latency histogram parts.
+	// SGLang equivalent of vllm:inter_token_latency_seconds_{sum,count}.
+	SGLangInterTokenLatencySecondsSum   = "sglang:inter_token_latency_seconds_sum"
+	SGLangInterTokenLatencySecondsCount = "sglang:inter_token_latency_seconds_count"
+
+	// SGLangPromptTokensHistogramSum/Count are the prompt-token histogram parts.
+	// SGLang equivalent of vllm:request_prompt_tokens_{sum,count}.
+	SGLangPromptTokensHistogramSum   = "sglang:prompt_tokens_histogram_sum"
+	SGLangPromptTokensHistogramCount = "sglang:prompt_tokens_histogram_count"
+
+	// SGLangGenerationTokensHistogramSum/Count are the generation-token histogram parts.
+	// SGLang equivalent of vllm:request_generation_tokens_{sum,count}.
+	SGLangGenerationTokensHistogramSum   = "sglang:generation_tokens_histogram_sum"
+	SGLangGenerationTokensHistogramCount = "sglang:generation_tokens_histogram_count"
+
+	// SGLangCachedTokensTotal is a counter of prompt tokens served from the prefix cache.
+	// Used with SGLangPromptTokensTotal to compute the prefix cache hit rate, the
+	// unit-safe analog of vllm:prefix_cache_hits / vllm:prefix_cache_queries.
+	SGLangCachedTokensTotal = "sglang:cached_tokens_total"
+
+	// SGLangPromptTokensTotal is a counter of total prompt tokens.
+	SGLangPromptTokensTotal = "sglang:prompt_tokens_total"
+
+	// SGLangNumRequestsTotal is a counter of received requests.
+	// SGLang equivalent of vllm:request_success_total (used for scale-to-zero).
+	SGLangNumRequestsTotal = "sglang:num_requests_total"
+)
+
 // llm-d Inference Scheduler Flow Control Metrics
 // These metrics come from the Gateway API Inference Extension EPP (Endpoint Picker)
 // flow control layer, not from vLLM pods. They are model-scoped (not per-pod).

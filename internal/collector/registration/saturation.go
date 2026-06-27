@@ -2,6 +2,7 @@ package registration
 
 import (
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/inferenceengine"
 )
 
 // Query name constants for type-safe query references.
@@ -134,4 +135,77 @@ func RegisterSaturationQueries(sourceRegistry *source.SourceRegistry) {
 		Description: "Total bytes queued in scheduler flow control for this model",
 	})
 
+	registerSGLangSaturationQueries(registry)
+}
+
+// registerSGLangSaturationQueries registers the SGLang variants of the
+// engine-specific saturation queries. The scheduler flow-control queries above
+// are engine-agnostic (sourced from EPP) and are not duplicated here.
+func registerSGLangSaturationQueries(registry *source.QueryList) {
+	// KV-cache token-pool utilization per instance (peak over last minute).
+	// sglang:token_usage is the 0.0-1.0 fraction equivalent of vllm:kv_cache_usage_perc.
+	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
+		Name:        QueryKvCacheUsage,
+		Type:        source.QueryTypePromQL,
+		Template:    `max by (instance, pod, llm_d_ai_variant) (max_over_time(sglang:token_usage{namespace="{{.namespace}}",model_name="{{.modelID}}"}[1m]))`,
+		Params:      []string{source.ParamNamespace, source.ParamModelID},
+		Description: "Peak KV cache utilization per instance (0.0-1.0) over last minute (SGLang)",
+	})
+
+	// Queue length per instance (peak over last minute).
+	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
+		Name:        QueryQueueLength,
+		Type:        source.QueryTypePromQL,
+		Template:    `max by (instance, pod, llm_d_ai_variant) (max_over_time(sglang:num_queue_reqs{namespace="{{.namespace}}",model_name="{{.modelID}}"}[1m]))`,
+		Params:      []string{source.ParamNamespace, source.ParamModelID},
+		Description: "Peak queue length per instance over last minute (SGLang)",
+	})
+
+	// Total KV-cache token capacity per instance.
+	//
+	// Structural difference from vLLM: SGLang exposes capacity directly via
+	// sglang:max_total_num_tokens (a model-labeled gauge), so this query can
+	// filter by model_name and returns the capacity as the value — there are no
+	// num_gpu_blocks/block_size labels. The collector converts this value into
+	// TotalKvCapacityTokens directly (see CollectReplicaMetrics).
+	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
+		Name:        QueryCacheConfigInfo,
+		Type:        source.QueryTypePromQL,
+		Template:    `max by (instance, pod, llm_d_ai_variant) (sglang:max_total_num_tokens{namespace="{{.namespace}}",model_name="{{.modelID}}"})`,
+		Params:      []string{source.ParamNamespace, source.ParamModelID},
+		Description: "Total KV cache token capacity per instance (SGLang)",
+	})
+
+	// Average output (generation) tokens per completed request (5m rate).
+	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
+		Name:        QueryAvgOutputTokens,
+		Type:        source.QueryTypePromQL,
+		Template:    `max by (instance, pod, llm_d_ai_variant) (rate(sglang:generation_tokens_histogram_sum{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]) / rate(sglang:generation_tokens_histogram_count{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]))`,
+		Params:      []string{source.ParamNamespace, source.ParamModelID},
+		Description: "Average output tokens per completed request (5m rate) (SGLang)",
+	})
+
+	// Average input (prompt) tokens per completed request (5m rate).
+	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
+		Name:        QueryAvgInputTokens,
+		Type:        source.QueryTypePromQL,
+		Template:    `max by (instance, pod, llm_d_ai_variant) (rate(sglang:prompt_tokens_histogram_sum{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]) / rate(sglang:prompt_tokens_histogram_count{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]))`,
+		Params:      []string{source.ParamNamespace, source.ParamModelID},
+		Description: "Average input tokens per completed request (5m rate) (SGLang)",
+	})
+
+	// Prefix cache hit rate per instance (5m rate).
+	//
+	// Structural difference from vLLM: derived from SGLang's token counters
+	// (cached prompt tokens / total prompt tokens) rather than hit/query counters.
+	// This is unit-safe (0.0-1.0) and parallels the vLLM hits/queries formula.
+	// SGLang also exposes sglang:cache_hit_rate directly, but its units are
+	// version-dependent (0-1 vs 0-100), so the counter ratio is preferred.
+	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
+		Name:        QueryPrefixCacheHitRate,
+		Type:        source.QueryTypePromQL,
+		Template:    `max by (instance, pod, llm_d_ai_variant) (rate(sglang:cached_tokens_total{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]) / rate(sglang:prompt_tokens_total{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]))`,
+		Params:      []string{source.ParamNamespace, source.ParamModelID},
+		Description: "Prefix cache hit rate per instance (0.0-1.0, 5m rate) (SGLang)",
+	})
 }

@@ -7,21 +7,30 @@ import (
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils/scaletarget"
 )
 
-// VLLMEngineParams holds vLLM configuration parameters parsed from a
+// VLLMEngineParams holds inference-engine configuration parameters parsed from a
 // Deployment/LWS's container args and environment variables. These are used
 // to derive compute-bound capacity (k2) when no live metrics are available.
+//
+// Despite the name, this struct is the shared engine-params type for all
+// supported engines: ParseVLLMArgs populates it from vLLM flags and
+// ParseSGLangArgs populates it from SGLang flags (mapped onto the same fields).
 type VLLMEngineParams struct {
 	GpuMemoryUtilization  float64 // default: 0.9
-	BlockSize             int64   // default: 16
+	BlockSize             int64   // default: 16 (vLLM block size / SGLang page size)
 	KvCacheDtype          string  // default: "auto"
 	TensorParallelSize    int     // default: 1
-	NumGpuBlocksOverride  int64   // default: 0 (not set)
+	NumGpuBlocksOverride  int64   // default: 0 (not set) — vLLM only
 	MaxNumBatchedTokens   int64   // default: 0 (auto)
-	MaxNumSeqs            int64   // default: 256
-	MaxModelLen           int64   // default: 0 (auto)
-	EnforceEager          bool    // default: false
-	IsV1Engine            bool    // VLLM_USE_V1 env detection (default: true since v0.8)
+	MaxNumSeqs            int64   // default: 256 (vLLM --max-num-seqs / SGLang --max-running-requests)
+	MaxModelLen           int64   // default: 0 (auto) (vLLM --max-model-len / SGLang --context-length)
+	EnforceEager          bool    // default: false (vLLM --enforce-eager / SGLang --disable-cuda-graph)
+	IsV1Engine            bool    // VLLM_USE_V1 env detection (default: true since v0.8); always true for SGLang
 	ChunkedPrefillEnabled bool    // true for V1, or --enable-chunked-prefill
+
+	// TotalKvTokensOverride is the explicit total KV-cache token capacity, when the
+	// engine exposes it as a deployment flag (SGLang --max-total-tokens). 0 = unset.
+	// vLLM has no equivalent flag and uses NumGpuBlocksOverride instead.
+	TotalKvTokensOverride int64
 
 	// EffectiveMaxBatchedTokens is the resolved per-step token budget used
 	// for k2 derivation. It is computed after parsing all other fields.
@@ -154,8 +163,17 @@ func normalizeKey(key string) string {
 	return strings.ReplaceAll(key, "-", "_")
 }
 
-// parseArgs walks the argument list and populates params.
+// parseArgs walks the argument list and populates params using the vLLM flag mapping.
 func parseArgs(args []string, params *VLLMEngineParams) {
+	parseArgsWith(args, params, applyParam)
+}
+
+// parseArgsWith walks the argument list and applies each normalized --key/value
+// pair via the supplied apply function. It is shared by the vLLM and SGLang
+// parsers, which differ only in their per-flag mapping (applyParam vs
+// applySGLangParam). Boolean flags (no following value) are passed with an empty
+// value string.
+func parseArgsWith(args []string, params *VLLMEngineParams, apply func(key, value string, params *VLLMEngineParams)) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if !strings.HasPrefix(arg, "--") {
@@ -177,7 +195,7 @@ func parseArgs(args []string, params *VLLMEngineParams) {
 			// Otherwise it's a boolean flag (no value)
 		}
 
-		applyParam(key, value, params)
+		apply(key, value, params)
 	}
 }
 

@@ -60,6 +60,7 @@ import (
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/constants"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/controller/indexers"
 	saturation_v2 "github.com/llm-d/llm-d-workload-variant-autoscaler/internal/engines/analyzers/saturation_v2"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/inferenceengine"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/interfaces"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/metrics"
@@ -340,25 +341,19 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 		source.ParamNamespace: namespace,
 	}
 
+	// Determine which inference engines this model's variants run. Engine-specific
+	// queries are refreshed once per present engine (vLLM pods emit vllm:* series,
+	// SGLang pods emit sglang:* series — the per-pod results are disjoint and are
+	// merged back under the logical query name below). For vLLM-only models this
+	// is identical to the previous fixed query list.
+	engines := inferenceengine.Present(scaleTargets)
+
 	// Refresh all Prometheus-sourced queries:
 	// - Saturation: KV cache, queue length, cache config, prefix cache hit rate
 	// - Shared (saturation + queueing model): avg input tokens, avg output tokens
 	// - Queueing model: scheduler dispatch rate, avg TTFT, avg ITL
-	// - Throughput analyzer: generation token rate, instantaneous KV usage (k*), vLLM request rate
-	queries := []string{
-		registration.QueryKvCacheUsage,
-		registration.QueryQueueLength,
-		registration.QueryCacheConfigInfo,
-		registration.QueryAvgOutputTokens,
-		registration.QueryAvgInputTokens,
-		registration.QueryPrefixCacheHitRate,
-		registration.QuerySchedulerDispatchRate,
-		registration.QueryAvgTTFT,
-		registration.QueryAvgITL,
-		registration.QueryGenerationTokenRate,
-		registration.QueryKvUsageInstant,
-		registration.QueryVLLMRequestRate,
-	}
+	// - Throughput analyzer: generation token rate, instantaneous KV usage (k*), request rate
+	queries := buildEngineQueryList(engines, engineSpecificReplicaQueries, agnosticReplicaQueries)
 
 	// Execute the query with timing
 	startTime := time.Now()
@@ -378,6 +373,13 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 		metrics.IncMetricsCollectionErrors(constants.QueryTypeCacheConfig, reason)
 		return nil, fmt.Errorf("failed to refresh replica metrics: %w", err)
 	}
+
+	// Re-key engine-specific results under their logical query names so the per-pod
+	// processing below is engine-agnostic. For SGLang-only models this renames the
+	// "sglang/<query>" results to "<query>"; for mixed-engine models it concatenates
+	// the per-engine series. The structural cache-config difference is handled by a
+	// dedicated SGLang pass after the vLLM cache-config block.
+	mergeEngineResults(results, engines, engineSpecificReplicaQueries)
 
 	// podMetricData holds per-pod metric values and timestamps
 	type podMetricData struct {
@@ -557,6 +559,43 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 					"pod", podName,
 					"numGpuBlocks", data.numGpuBlocks,
 					"blockSize", data.blockSize)
+			}
+		}
+	}
+
+	// Process SGLang cache config (structural difference from vLLM).
+	//
+	// SGLang exposes total KV-cache token capacity directly via
+	// sglang:max_total_num_tokens (the value), rather than as
+	// num_gpu_blocks/block_size labels. We map the capacity onto the existing
+	// numGpuBlocks × blockSize computation by setting blockSize = 1 and
+	// numGpuBlocks = capacity, so the downstream TotalKvCapacityTokens math is
+	// unchanged. Only runs when an SGLang variant is present for this model.
+	if containsEngine(engines, inferenceengine.EngineSGLang) {
+		sglangCacheKey := registration.EngineQuery(inferenceengine.EngineSGLang, registration.QueryCacheConfigInfo)
+		if result := results[sglangCacheKey]; result != nil && !result.HasError() {
+			for _, value := range result.Values {
+				instanceKey, podName, _ := c.buildInstanceKey(ctx, namespace, value.Labels)
+				if instanceKey == "" {
+					continue
+				}
+				data := podData[instanceKey]
+				if data == nil {
+					// Not seen by the model-scoped KV/queue queries — skip.
+					continue
+				}
+				capacity := int64(value.Value)
+				if capacity > 0 {
+					data.numGpuBlocks = capacity
+					data.blockSize = 1
+					data.hasCacheConfig = true
+					data.cacheConfigTimestamp = value.Timestamp
+				}
+
+				logger.V(logging.DEBUG).Info("SGLang cache config metric",
+					"instanceKey", instanceKey,
+					"pod", podName,
+					"totalKvCapacityTokens", capacity)
 			}
 		}
 	}
@@ -791,12 +830,13 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 	}
 
 	// Pre-compute MaxBatchSize per scale target from container args.
-	// MaxBatchSize (--max-num-seqs) is not a Prometheus metric; it is parsed
-	// from the Deployment/LWS spec using the vLLM argument parser.
+	// MaxBatchSize is not a Prometheus metric; it is parsed from the Deployment/LWS
+	// spec using the argument parser for the variant's detected engine
+	// (vLLM --max-num-seqs / SGLang --max-running-requests).
 	// Map key is scale target key (namespace/name).
 	scaleTargetMaxBatchSize := make(map[string]int64, len(scaleTargets))
 	for key, scaleTarget := range scaleTargets {
-		params := saturation_v2.ParseVLLMArgs(scaleTarget)
+		params := saturation_v2.ParseEngineArgs(inferenceengine.Detect(scaleTarget), scaleTarget)
 		scaleTargetMaxBatchSize[key] = params.MaxNumSeqs
 	}
 
