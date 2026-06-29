@@ -21,7 +21,7 @@ import (
 // This exercises the same code path as vLLM, only with SGLang metric names and
 // flags. It runs in the kind-emulator environment (cfg.UseSimulator); a real
 // SGLang server requires a GPU.
-var _ = Describe("SGLang backend", Ordered, func() {
+var _ = Describe("SGLang backend", Label("smoke", "full"), Ordered, func() {
 	const (
 		baseName = "e2e-sglang"
 		vaName   = "e2e-sglang-va"
@@ -68,6 +68,13 @@ var _ = Describe("SGLang backend", Ordered, func() {
 			// collected the SGLang metrics (vLLM queries would return nothing here).
 			g.Expect(va.Status.DesiredOptimizedAlloc.NumReplicas).NotTo(BeNil(),
 				"WVA should compute a desired replica count from sglang:* metrics")
+			// Assert an actual scale-up rather than just a non-nil count: static
+			// arg-based capacity estimation alone would still produce a value even
+			// if engine routing were broken. The fixture emits a saturated operating
+			// point (token_usage=0.85, num_queue_reqs=3), so a correctly routed
+			// SGLang collection must drive the variant above a single replica.
+			g.Expect(*va.Status.DesiredOptimizedAlloc.NumReplicas).To(BeNumerically(">", 1),
+				"saturated sglang:* metrics should drive a scale-up above 1 replica")
 		}).WithTimeout(time.Duration(cfg.EventuallyExtendedSec) * time.Second).
 			WithPolling(time.Duration(cfg.PollIntervalSlowSec) * time.Second).
 			Should(Succeed())

@@ -135,13 +135,14 @@ type ReplicaMetrics struct {
 	// Zero when metrics are unavailable.
 	KvUsageInstant float64
 
-	// VLLMRequestRate is the vLLM-side request completion rate on this replica (req/s).
-	// Derived from rate(vllm:request_generation_tokens_count[1m]) per pod.
+	// RequestRate is the engine-side request completion rate on this replica (req/s).
+	// Engine-agnostic: derived per pod from rate(vllm:request_generation_tokens_count[1m])
+	// for vLLM and rate(sglang:generation_tokens_histogram_count[1m]) for SGLang.
 	// TA notation: fallback λ_req — used when ArrivalRate == 0 (EPP not deployed).
-	// λ_dec_fallback = sum(VLLMRequestRate) × avg(AvgOutputTokens).
+	// λ_dec_fallback = sum(RequestRate) × avg(AvgOutputTokens).
 	// Measures completed requests only; undercounts when requests queue in the scheduler.
 	// Zero when metrics are unavailable.
-	VLLMRequestRate float64
+	RequestRate float64
 }
 
 // ReplicaMetricsMetadata contains freshness information for replica metrics

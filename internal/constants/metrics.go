@@ -91,24 +91,36 @@ const (
 	// vllm:cache_config_info (num_gpu_blocks x block_size).
 	SGLangMaxTotalNumTokens = "sglang:max_total_num_tokens"
 
-	// SGLangTimeToFirstTokenSecondsSum/Count are the TTFT histogram parts.
-	// SGLang equivalent of vllm:time_to_first_token_seconds_{sum,count}.
-	SGLangTimeToFirstTokenSecondsSum   = "sglang:time_to_first_token_seconds_sum"
+	// SGLangTimeToFirstTokenSecondsSum is the sum part of the TTFT histogram.
+	// SGLang equivalent of vllm:time_to_first_token_seconds_sum.
+	SGLangTimeToFirstTokenSecondsSum = "sglang:time_to_first_token_seconds_sum"
+
+	// SGLangTimeToFirstTokenSecondsCount is the count part of the TTFT histogram.
+	// SGLang equivalent of vllm:time_to_first_token_seconds_count.
 	SGLangTimeToFirstTokenSecondsCount = "sglang:time_to_first_token_seconds_count"
 
-	// SGLangInterTokenLatencySecondsSum/Count are the inter-token-latency histogram parts.
-	// SGLang equivalent of vllm:inter_token_latency_seconds_{sum,count}.
-	SGLangInterTokenLatencySecondsSum   = "sglang:inter_token_latency_seconds_sum"
+	// SGLangInterTokenLatencySecondsSum is the sum part of the inter-token-latency histogram.
+	// SGLang equivalent of vllm:inter_token_latency_seconds_sum.
+	SGLangInterTokenLatencySecondsSum = "sglang:inter_token_latency_seconds_sum"
+
+	// SGLangInterTokenLatencySecondsCount is the count part of the inter-token-latency histogram.
+	// SGLang equivalent of vllm:inter_token_latency_seconds_count.
 	SGLangInterTokenLatencySecondsCount = "sglang:inter_token_latency_seconds_count"
 
-	// SGLangPromptTokensHistogramSum/Count are the prompt-token histogram parts.
-	// SGLang equivalent of vllm:request_prompt_tokens_{sum,count}.
-	SGLangPromptTokensHistogramSum   = "sglang:prompt_tokens_histogram_sum"
+	// SGLangPromptTokensHistogramSum is the sum part of the prompt-token histogram.
+	// SGLang equivalent of vllm:request_prompt_tokens_sum.
+	SGLangPromptTokensHistogramSum = "sglang:prompt_tokens_histogram_sum"
+
+	// SGLangPromptTokensHistogramCount is the count part of the prompt-token histogram.
+	// SGLang equivalent of vllm:request_prompt_tokens_count.
 	SGLangPromptTokensHistogramCount = "sglang:prompt_tokens_histogram_count"
 
-	// SGLangGenerationTokensHistogramSum/Count are the generation-token histogram parts.
-	// SGLang equivalent of vllm:request_generation_tokens_{sum,count}.
-	SGLangGenerationTokensHistogramSum   = "sglang:generation_tokens_histogram_sum"
+	// SGLangGenerationTokensHistogramSum is the sum part of the generation-token histogram.
+	// SGLang equivalent of vllm:request_generation_tokens_sum.
+	SGLangGenerationTokensHistogramSum = "sglang:generation_tokens_histogram_sum"
+
+	// SGLangGenerationTokensHistogramCount is the count part of the generation-token histogram.
+	// SGLang equivalent of vllm:request_generation_tokens_count.
 	SGLangGenerationTokensHistogramCount = "sglang:generation_tokens_histogram_count"
 
 	// SGLangCachedTokensTotal is a counter of prompt tokens served from the prefix cache.

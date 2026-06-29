@@ -8,6 +8,7 @@
 package inferenceengine
 
 import (
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -67,20 +68,14 @@ func isSGLangContainer(c *corev1.Container) bool {
 	// Join command + args into a single lowercase string so we catch both the
 	// argv form (["python", "-m", "sglang.launch_server", ...]) and the shell
 	// form (["/bin/sh", "-c", "python -m sglang.launch_server ..."]).
-	var b strings.Builder
-	for _, tok := range c.Command {
-		b.WriteString(tok)
-		b.WriteByte(' ')
-	}
-	for _, tok := range c.Args {
-		b.WriteString(tok)
-		b.WriteByte(' ')
-	}
-	cmd := strings.ToLower(b.String())
+	cmd := strings.ToLower(strings.Join(slices.Concat(c.Command, c.Args), " "))
 
+	// Match only the documented launch forms. A bare "-m sglang" prefix is
+	// intentionally not matched: it is broader than the contract (it would also
+	// match "-m sglang_bench" and similar), and the two forms below already cover
+	// every supported SGLang launch.
 	return strings.Contains(cmd, "sglang.launch_server") ||
-		strings.Contains(cmd, "sglang serve") ||
-		strings.Contains(cmd, "-m sglang")
+		strings.Contains(cmd, "sglang serve")
 }
 
 // Present returns the deterministically-ordered set of distinct engines detected

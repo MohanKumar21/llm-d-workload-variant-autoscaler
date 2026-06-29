@@ -45,7 +45,11 @@ def render():
     s("sglang:max_total_num_tokens", 100000)
     s("sglang:num_requests_total", 2 * el)
     s("sglang:prompt_tokens_total", 1000 * el)
-    s("sglang:cached_tokens_total", 300 * el)
+    # cached_tokens_total carries an extra cache_source label (as real SGLang does),
+    # so its label set differs from prompt_tokens_total. The prefix-cache-hit-rate
+    # query must aggregate this label away before dividing; emitting it here keeps
+    # the e2e a genuine regression guard for that PromQL.
+    out.append('sglang:cached_tokens_total{%s,cache_source="radix_cache"} %r' % (L, float(300 * el)))
     s("sglang:time_to_first_token_seconds_count", 2 * el)
     s("sglang:time_to_first_token_seconds_sum", 1.0 * el)
     s("sglang:inter_token_latency_seconds_count", 200 * el)

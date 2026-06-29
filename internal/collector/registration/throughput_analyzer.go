@@ -53,18 +53,20 @@ const (
 	// Source: vllm:kv_cache_usage_perc (gauge)
 	QueryKvUsageInstant = "kv_usage_instant"
 
-	// QueryVLLMRequestRate is the query name for the vLLM-side request completion
+	// QueryRequestRate is the query name for the engine-side request completion
 	// rate per pod (req/s), derived from the generation tokens histogram count.
+	// It is engine-agnostic: the vLLM variant reads
+	// vllm:request_generation_tokens_count and the SGLang variant reads
+	// sglang:generation_tokens_histogram_count.
 	//
 	// Used as a fallback for λ_dec estimation when EPP/scheduler metrics are
 	// unavailable (ArrivalRate == 0 for all pods). Per variant V, the analyzer computes:
-	//   λ_dec_vllm = Σ_{r∈V}(VLLMRequestRate_r × AvgOutputTokens_r)
+	//   λ_dec_fallback = Σ_{r∈V}(RequestRate_r × AvgOutputTokens_r)
 	//
 	// Note: measures completed requests (served demand), not arriving requests.
 	// It undercounts when requests are queued in the scheduler. Use
 	// ArrivalRate (via QuerySchedulerDispatchRate) as the primary demand source.
-	// Source: vllm:request_generation_tokens_count (histogram _count counter)
-	QueryVLLMRequestRate = "vllm_request_rate"
+	QueryRequestRate = "request_rate"
 )
 
 // RegisterThroughputAnalyzerQueries registers the three TA-exclusive queries.
@@ -73,7 +75,7 @@ const (
 // Registered queries:
 //   - QueryGenerationTokenRate — μ_dec^obs: observed decode token rate per pod
 //   - QueryKvUsageInstant      — k*: instantaneous KV cache utilization per pod
-//   - QueryVLLMRequestRate     — fallback λ_req: completion rate per pod when EPP absent
+//   - QueryRequestRate     — fallback λ_req: completion rate per pod when EPP absent
 //
 // Additional TA inputs are read from interfaces.ReplicaMetrics fields populated by
 // RegisterSaturationQueries (TotalKvCapacityTokens, AvgOutputTokens, AvgInputTokens,
@@ -90,7 +92,7 @@ const (
 //
 // Per variant V (summed over that variant's replicas only):
 // λ_dec primary:  Σ_{r∈V}(ArrivalRate_r × AvgOutputTokens_r)     [EPP deployed]
-// λ_dec fallback: Σ_{r∈V}(VLLMRequestRate_r × AvgOutputTokens_r) [EPP absent]
+// λ_dec fallback: Σ_{r∈V}(RequestRate_r × AvgOutputTokens_r) [EPP absent]
 func RegisterThroughputAnalyzerQueries(sourceRegistry *source.SourceRegistry) {
 	metricsSource := sourceRegistry.Get("prometheus")
 	if metricsSource == nil {
@@ -130,11 +132,11 @@ func RegisterThroughputAnalyzerQueries(sourceRegistry *source.SourceRegistry) {
 	// Derived from the generation tokens histogram _count (increments once per
 	// completed request). Used as a fallback for λ_dec when EPP/scheduler metrics
 	// are unavailable; per variant V, the analyzer falls back to:
-	//   λ_dec_vllm = Σ_{r∈V}(VLLMRequestRate_r × AvgOutputTokens_r)
+	//   λ_dec_fallback = Σ_{r∈V}(RequestRate_r × AvgOutputTokens_r)
 	// Preserves instance (IP:port for composite key), pod (for pod lookup),
 	// and llm_d_ai_variant (for direct pod-to-VA mapping).
 	registry.MustRegister(source.QueryTemplate{
-		Name:        QueryVLLMRequestRate,
+		Name:        QueryRequestRate,
 		Type:        source.QueryTypePromQL,
 		Template:    `sum by (instance, pod, llm_d_ai_variant) (rate(vllm:request_generation_tokens_count{namespace="{{.namespace}}",model_name="{{.modelID}}"}[1m]))`,
 		Params:      []string{source.ParamNamespace, source.ParamModelID},
@@ -168,7 +170,7 @@ func registerSGLangThroughputAnalyzerQueries(registry *source.QueryList) {
 
 	// Per-pod request completion rate (req/s) from the generation histogram count.
 	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
-		Name:        QueryVLLMRequestRate,
+		Name:        QueryRequestRate,
 		Type:        source.QueryTypePromQL,
 		Template:    `sum by (instance, pod, llm_d_ai_variant) (rate(sglang:generation_tokens_histogram_count{namespace="{{.namespace}}",model_name="{{.modelID}}"}[1m]))`,
 		Params:      []string{source.ParamNamespace, source.ParamModelID},

@@ -65,6 +65,14 @@ var _ = Describe("ParseSGLangArgs", func() {
 			Expect(params.EnforceEager).To(BeTrue())
 		})
 
+		It("should map --max-prefill-tokens to the per-step token budget", func() {
+			deploy := makeTestDeployment("--max-prefill-tokens=16384")
+			params := ParseSGLangArgs(scaletarget.NewDeploymentAccessor(deploy))
+			Expect(params.MaxNumBatchedTokens).To(Equal(int64(16384)))
+			// With an explicit batched-token budget, it is used verbatim.
+			Expect(params.EffectiveMaxBatchedTokens).To(Equal(int64(16384)))
+		})
+
 		It("should set the per-step token budget from --chunked-prefill-size", func() {
 			deploy := makeTestDeployment("--chunked-prefill-size=4096")
 			params := ParseSGLangArgs(scaletarget.NewDeploymentAccessor(deploy))

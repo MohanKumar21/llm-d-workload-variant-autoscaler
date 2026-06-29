@@ -36,7 +36,7 @@ func RegisterQueueingModelQueries(sourceRegistry *source.SourceRegistry) {
 	// This follows the same pattern as scheduler flow control queries.
 	// Uses sum (not max) because dispatch rate is an additive counter — multiple
 	// series per instance should be summed. Uses rate() over 1m window for requests/sec.
-	// Groups by pod_name and port to uniquely identify each vLLM instance.
+	// Groups by pod_name and port to uniquely identify each engine instance.
 	registry.MustRegister(source.QueryTemplate{
 		Name: QuerySchedulerDispatchRate,
 		Type: source.QueryTypePromQL,
@@ -50,7 +50,7 @@ func RegisterQueueingModelQueries(sourceRegistry *source.SourceRegistry) {
 	// Average time-to-first-token per instance (seconds).
 	// Uses histogram rate(sum[1m]) / rate(count[1m]) over a 1m sliding window.
 	// Used by queueing model tuner as the observed TTFT for Kalman filter updates.
-	// Preserves instance (IP:port for multi-vLLM pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
+	// Preserves instance (IP:port for multi-instance pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
 	registry.MustRegister(source.QueryTemplate{
 		Name:     QueryAvgTTFT,
 		Type:     source.QueryTypePromQL,
@@ -63,7 +63,7 @@ func RegisterQueueingModelQueries(sourceRegistry *source.SourceRegistry) {
 	// Average inter-token latency per instance (seconds).
 	// Uses histogram rate(sum[1m]) / rate(count[1m]) over a 1m sliding window.
 	// Used by queueing model tuner as the observed ITL for Kalman filter updates.
-	// Preserves instance (IP:port for multi-vLLM pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
+	// Preserves instance (IP:port for multi-instance pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
 	registry.MustRegister(source.QueryTemplate{
 		Name:     QueryAvgITL,
 		Type:     source.QueryTypePromQL,
@@ -73,10 +73,11 @@ func RegisterQueueingModelQueries(sourceRegistry *source.SourceRegistry) {
 			"used by queueing model tuner for parameter learning",
 	})
 
-	// Note: MaxBatchSize (max_num_seqs) is not available as a Prometheus metric from vLLM.
-	// It is sourced from the Deployment's container args using the deployment parser
-	// (see saturation_v2.ParseVLLMArgs). The collector populates ReplicaMetrics.MaxBatchSize
-	// by parsing the --max-num-seqs flag from the pod's parent Deployment spec.
+	// Note: MaxBatchSize (the max concurrent-request budget) is not available as a
+	// Prometheus metric from either engine. It is sourced from the Deployment's
+	// container args using the engine-aware deployment parser
+	// (see saturation_v2.ParseEngineArgs). The collector populates
+	// ReplicaMetrics.MaxBatchSize from --max-num-seqs (vLLM) or --max-running-requests (SGLang).
 
 	registerSGLangQueueingModelQueries(registry)
 }

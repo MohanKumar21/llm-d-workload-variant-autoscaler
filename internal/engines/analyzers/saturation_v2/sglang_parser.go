@@ -9,19 +9,20 @@ import (
 
 // ParseEngineArgs parses a scale target's container args using the parser
 // appropriate for the given inference engine, returning the shared
-// VLLMEngineParams. It dispatches to ParseSGLangArgs for SGLang and ParseVLLMArgs
+// EngineParams. It dispatches to ParseSGLangArgs for SGLang and ParseVLLMArgs
 // otherwise (the default), so existing vLLM behavior is unchanged.
-func ParseEngineArgs(engine inferenceengine.Engine, scaleTarget scaletarget.ScaleTargetAccessor) VLLMEngineParams {
+func ParseEngineArgs(engine inferenceengine.Engine, scaleTarget scaletarget.ScaleTargetAccessor) EngineParams {
 	if engine == inferenceengine.EngineSGLang {
 		return ParseSGLangArgs(scaleTarget)
 	}
 	return ParseVLLMArgs(scaleTarget)
 }
 
-// defaultSGLangEngineParams returns VLLMEngineParams with SGLang defaults.
+// defaultSGLangEngineParams returns EngineParams with SGLang defaults.
 // Flag defaults were taken from SGLang's server_args.py.
-func defaultSGLangEngineParams() VLLMEngineParams {
-	return VLLMEngineParams{
+func defaultSGLangEngineParams() EngineParams {
+	return EngineParams{
+		Engine:               inferenceengine.EngineSGLang,
 		GpuMemoryUtilization: 0.9, // --mem-fraction-static default
 		BlockSize:            1,   // --page-size default
 		KvCacheDtype:         "auto",
@@ -41,7 +42,7 @@ func defaultSGLangEngineParams() VLLMEngineParams {
 //   - hyphen/underscore normalization
 //   - shell commands: ["/bin/sh", "-c", "python -m sglang.launch_server ..."]
 //   - boolean flags: --disable-cuda-graph (no value)
-func ParseSGLangArgs(scaleTarget scaletarget.ScaleTargetAccessor) VLLMEngineParams {
+func ParseSGLangArgs(scaleTarget scaletarget.ScaleTargetAccessor) EngineParams {
 	params := defaultSGLangEngineParams()
 	if scaleTarget == nil {
 		resolveEffectiveMaxBatchedTokens(&params)
@@ -65,11 +66,11 @@ func ParseSGLangArgs(scaleTarget scaletarget.ScaleTargetAccessor) VLLMEnginePara
 	return params
 }
 
-// applySGLangParam sets the corresponding VLLMEngineParams field from a
+// applySGLangParam sets the corresponding EngineParams field from a
 // normalized SGLang flag key and its string value. Parse errors are silently
 // ignored and the default value is preserved (graceful degradation), matching
 // the vLLM parser's behavior.
-func applySGLangParam(key, value string, params *VLLMEngineParams) {
+func applySGLangParam(key, value string, params *EngineParams) {
 	switch key {
 	case "mem_fraction_static":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {

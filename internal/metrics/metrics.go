@@ -187,14 +187,14 @@ func InitMetrics(registry prometheus.Registerer) error {
 	kvCacheTokensUsed = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: constants.WVAKvCacheTokensUsed,
-			Help: "Total KV cache tokens currently in use across all replicas of a variant (sum of vLLM TokensInUse).",
+			Help: "Total KV cache tokens currently in use across all replicas of a variant (sum of per-replica TokensInUse).",
 		},
 		satModelLabels,
 	)
 	kvCacheTokensCapacity = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: constants.WVAKvCacheTokensCapacity,
-			Help: "Total KV cache token capacity across all replicas of a variant (sum of vLLM TotalKvCapacityTokens).",
+			Help: "Total KV cache token capacity across all replicas of a variant (sum of per-replica TotalKvCapacityTokens).",
 		},
 		satModelLabels,
 	)

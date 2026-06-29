@@ -48,8 +48,21 @@ func TestDetect(t *testing.T) {
 			want:      EngineSGLang,
 		},
 		{
+			name:      "SGLang serve subcommand",
+			container: corev1.Container{Name: "server", Image: "registry.example.com/serving:1.0", Command: []string{"sglang", "serve", "m"}},
+			want:      EngineSGLang,
+		},
+		{
 			name:      "no signal defaults to vLLM",
 			container: corev1.Container{Name: "server", Image: "registry.example.com/serving:1.0", Command: []string{"serve"}},
+			want:      EngineVLLM,
+		},
+		{
+			// Guard against the dropped over-broad "-m sglang" substring: a module
+			// whose name merely starts with "sglang" (e.g. a benchmark harness) must
+			// NOT be detected as an SGLang server.
+			name:      "-m sglang_bench is not an SGLang server (false-positive guard)",
+			container: corev1.Container{Name: "server", Image: "registry.example.com/serving:1.0", Command: []string{"python", "-m", "sglang_bench", "--model", "m"}},
 			want:      EngineVLLM,
 		},
 	}

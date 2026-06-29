@@ -4,17 +4,25 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/inferenceengine"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils/scaletarget"
 )
 
-// VLLMEngineParams holds inference-engine configuration parameters parsed from a
+// EngineParams holds inference-engine configuration parameters parsed from a
 // Deployment/LWS's container args and environment variables. These are used
 // to derive compute-bound capacity (k2) when no live metrics are available.
 //
-// Despite the name, this struct is the shared engine-params type for all
-// supported engines: ParseVLLMArgs populates it from vLLM flags and
-// ParseSGLangArgs populates it from SGLang flags (mapped onto the same fields).
-type VLLMEngineParams struct {
+// It is the shared engine-params type for all supported engines: ParseVLLMArgs
+// populates it from vLLM flags and ParseSGLangArgs populates it from SGLang flags
+// (mapped onto the same fields). Field comments note the per-engine flag mapping.
+type EngineParams struct {
+	// Engine records which inference engine produced these params (set by the
+	// parser: EngineVLLM for ParseVLLMArgs, EngineSGLang for ParseSGLangArgs).
+	// IsCapacityCompatible compares it so a capacity record learned for one engine
+	// is never reused as the zero-replica estimate for a different engine serving
+	// the same model on the same hardware.
+	Engine inferenceengine.Engine
+
 	GpuMemoryUtilization  float64 // default: 0.9
 	BlockSize             int64   // default: 16 (vLLM block size / SGLang page size)
 	KvCacheDtype          string  // default: "auto"
@@ -37,11 +45,12 @@ type VLLMEngineParams struct {
 	EffectiveMaxBatchedTokens int64
 }
 
-// defaultVLLMEngineParams returns VLLMEngineParams with vLLM defaults
+// defaultEngineParams returns EngineParams with vLLM defaults
 // as of vLLM v0.8+. If vLLM changes its defaults in a future version,
 // these values should be updated accordingly.
-func defaultVLLMEngineParams() VLLMEngineParams {
-	return VLLMEngineParams{
+func defaultEngineParams() EngineParams {
+	return EngineParams{
+		Engine:                inferenceengine.EngineVLLM,
 		GpuMemoryUtilization:  0.9,
 		BlockSize:             16,
 		KvCacheDtype:          "auto",
@@ -61,8 +70,8 @@ func defaultVLLMEngineParams() VLLMEngineParams {
 //   - Shell commands: ["/bin/sh", "-c", "vllm serve model --arg=val"]
 //   - Boolean flags: --enforce-eager (no value)
 //   - VLLM_USE_V1 environment variable for V1 engine detection
-func ParseVLLMArgs(scaleTarget scaletarget.ScaleTargetAccessor) VLLMEngineParams {
-	params := defaultVLLMEngineParams()
+func ParseVLLMArgs(scaleTarget scaletarget.ScaleTargetAccessor) EngineParams {
+	params := defaultEngineParams()
 	if scaleTarget == nil {
 		resolveEffectiveMaxBatchedTokens(&params)
 		return params
@@ -164,7 +173,7 @@ func normalizeKey(key string) string {
 }
 
 // parseArgs walks the argument list and populates params using the vLLM flag mapping.
-func parseArgs(args []string, params *VLLMEngineParams) {
+func parseArgs(args []string, params *EngineParams) {
 	parseArgsWith(args, params, applyParam)
 }
 
@@ -173,7 +182,7 @@ func parseArgs(args []string, params *VLLMEngineParams) {
 // parsers, which differ only in their per-flag mapping (applyParam vs
 // applySGLangParam). Boolean flags (no following value) are passed with an empty
 // value string.
-func parseArgsWith(args []string, params *VLLMEngineParams, apply func(key, value string, params *VLLMEngineParams)) {
+func parseArgsWith(args []string, params *EngineParams, apply func(key, value string, params *EngineParams)) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if !strings.HasPrefix(arg, "--") {
@@ -199,11 +208,11 @@ func parseArgsWith(args []string, params *VLLMEngineParams, apply func(key, valu
 	}
 }
 
-// applyParam sets the corresponding VLLMEngineParams field from a
+// applyParam sets the corresponding EngineParams field from a
 // normalized key and its string value. Parse errors are silently ignored
 // and the default value is preserved — this is intentional graceful
 // degradation since deployment args are operator-controlled.
-func applyParam(key, value string, params *VLLMEngineParams) {
+func applyParam(key, value string, params *EngineParams) {
 	switch key {
 	case "gpu_memory_utilization":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
@@ -242,19 +251,21 @@ func applyParam(key, value string, params *VLLMEngineParams) {
 	}
 }
 
-// IsCapacityCompatible checks whether two VLLMEngineParams configurations
+// IsCapacityCompatible checks whether two EngineParams configurations
 // would produce equivalent per-replica capacity (both k1 and k2).
 // Used by CapacityKnowledgeStore.FindCompatible to identify variants
 // whose stored capacity can be reused for zero-replica estimation.
-func (p *VLLMEngineParams) IsCapacityCompatible(other *VLLMEngineParams) bool {
+func (p *EngineParams) IsCapacityCompatible(other *EngineParams) bool {
 	if p == nil || other == nil {
 		return false
 	}
-	return p.GpuMemoryUtilization == other.GpuMemoryUtilization &&
+	return p.Engine == other.Engine &&
+		p.GpuMemoryUtilization == other.GpuMemoryUtilization &&
 		p.BlockSize == other.BlockSize &&
 		p.KvCacheDtype == other.KvCacheDtype &&
 		p.TensorParallelSize == other.TensorParallelSize &&
 		p.NumGpuBlocksOverride == other.NumGpuBlocksOverride &&
+		p.TotalKvTokensOverride == other.TotalKvTokensOverride &&
 		p.EffectiveMaxBatchedTokens == other.EffectiveMaxBatchedTokens
 }
 
@@ -267,7 +278,7 @@ func (p *VLLMEngineParams) IsCapacityCompatible(other *VLLMEngineParams) bool {
 //  3. V0 engine with chunked prefill → 2048 (vLLM V0 default since v0.6.5)
 //  4. Unchunked prefill → max(MaxModelLen, 2048)
 //  5. Fallback → 2048
-func resolveEffectiveMaxBatchedTokens(params *VLLMEngineParams) {
+func resolveEffectiveMaxBatchedTokens(params *EngineParams) {
 	if params.MaxNumBatchedTokens > 0 {
 		params.EffectiveMaxBatchedTokens = params.MaxNumBatchedTokens
 		return

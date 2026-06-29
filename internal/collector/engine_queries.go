@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"slices"
+
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/registration"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/collector/source"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/inferenceengine"
@@ -9,6 +11,13 @@ import (
 // engineSpecificReplicaQueries are the logical query names collected per replica
 // whose metric source is the inference engine (vLLM/SGLang). Each is refreshed
 // once per present engine and merged back under its logical name.
+//
+// This is the per-replica subset of registration.EngineSpecificQueries (the
+// authoritative list of engine-specific logical queries). Every entry here MUST
+// also appear there — TestEngineSpecificReplicaQueriesSubset enforces it so the
+// two lists cannot drift. It intentionally omits registration.QueryModelRequestCount,
+// which is engine-specific but a scale-to-zero query (collected on demand by the
+// enforcer, not per replica in this collector).
 var engineSpecificReplicaQueries = []string{
 	registration.QueryKvCacheUsage,
 	registration.QueryQueueLength,
@@ -20,7 +29,7 @@ var engineSpecificReplicaQueries = []string{
 	registration.QueryAvgITL,
 	registration.QueryGenerationTokenRate,
 	registration.QueryKvUsageInstant,
-	registration.QueryVLLMRequestRate,
+	registration.QueryRequestRate,
 }
 
 // agnosticReplicaQueries are the logical query names collected per replica whose
@@ -72,6 +81,7 @@ func mergeEngineResults(results map[string]*source.MetricResult, engines []infer
 
 	for _, logical := range logicalNames {
 		var merged *source.MetricResult
+		var firstErr error
 		for _, eng := range engines {
 			r := results[registration.EngineQuery(eng, logical)]
 			if r == nil {
@@ -81,14 +91,22 @@ func mergeEngineResults(results map[string]*source.MetricResult, engines []infer
 				merged = &source.MetricResult{QueryName: logical, CollectedAt: r.CollectedAt}
 			}
 			merged.Values = append(merged.Values, r.Values...)
-			if merged.Error == nil && r.Error != nil {
-				merged.Error = r.Error
+			if firstErr == nil && r.Error != nil {
+				firstErr = r.Error
 			}
 			if !r.CollectedAt.IsZero() && (merged.CollectedAt.IsZero() || r.CollectedAt.Before(merged.CollectedAt)) {
 				merged.CollectedAt = r.CollectedAt
 			}
 		}
 		if merged != nil {
+			// Only surface an error when NO engine produced any series. A partial
+			// success — one engine errored (e.g. transient timeout) while another
+			// returned values — must not mark the merged result errored, or the
+			// downstream HasError() checks would discard the healthy engine's pods
+			// and blackhole scaling for the whole mixed-engine model.
+			if len(merged.Values) == 0 {
+				merged.Error = firstErr
+			}
 			results[logical] = merged
 		}
 	}
@@ -96,10 +114,5 @@ func mergeEngineResults(results map[string]*source.MetricResult, engines []infer
 
 // containsEngine reports whether the engine set includes the given engine.
 func containsEngine(engines []inferenceengine.Engine, target inferenceengine.Engine) bool {
-	for _, e := range engines {
-		if e == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(engines, target)
 }

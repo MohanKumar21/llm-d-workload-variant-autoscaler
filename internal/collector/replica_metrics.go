@@ -32,7 +32,7 @@ limitations under the License.
 //	    podName = value.Labels["pod_name"]
 //	}
 //
-// vLLM metrics are typically scraped via a PodMonitor or ServiceMonitor that
+// Engine metrics are typically scraped via a PodMonitor or ServiceMonitor that
 // applies the Prometheus operator's default target-relabeling, which produces
 // a "pod" label. Some scrape configurations (e.g., raw Prometheus scrape jobs,
 // kube-state-metrics–style configs) instead expose the pod identity as
@@ -348,6 +348,25 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 	// is identical to the previous fixed query list.
 	engines := inferenceengine.Present(scaleTargets)
 
+	// Log the engine detected for each scale target, plus the resolved engine set.
+	// inferenceengine.Detect defaults to vLLM when a leader pod template is nil or
+	// unresolvable, or when an SGLang image/command isn't matched — so a misdetected
+	// SGLang variant silently gets vllm:* queries and emits nothing. Logging the
+	// per-target engine lets operators tell "wrong engine detected" apart from
+	// "engine correct, but no metrics".
+	if debug := logger.V(logging.DEBUG); debug.Enabled() {
+		for key, st := range scaleTargets {
+			debug.Info("Detected inference engine for scale target",
+				"scaleTarget", key, "engine", inferenceengine.Detect(st).String())
+		}
+		engineNames := make([]string, len(engines))
+		for i, e := range engines {
+			engineNames[i] = e.String()
+		}
+		debug.Info("Resolved inference engines for model",
+			"modelID", modelID, "namespace", namespace, "engines", engineNames)
+	}
+
 	// Refresh all Prometheus-sourced queries:
 	// - Saturation: KV cache, queue length, cache config, prefix cache hit rate
 	// - Shared (saturation + queueing model): avg input tokens, avg output tokens
@@ -413,7 +432,7 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 		// Throughput analyzer fields
 		generationTokenRate float64
 		kvUsageInstant      float64
-		vllmRequestRate     float64
+		requestRate         float64
 	}
 
 	// trackMetricFreshness determines the freshness status of metrics in podMetricData
@@ -676,7 +695,7 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 	if result := results[registration.QuerySchedulerDispatchRate]; result != nil {
 		if !result.HasError() {
 			for _, value := range result.Values {
-				// The scheduler metric has pod_name and port labels to identify the vLLM instance.
+				// The scheduler metric has pod_name and port labels to identify the engine instance.
 				// Build a composite key: pod_name:port to support multiple instances per pod.
 				podName := value.Labels["pod_name"]
 				port := value.Labels["port"]
@@ -811,8 +830,8 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 		}
 	}
 
-	// Process vLLM request completion rate (req/s) — throughput analyzer fallback λ_req
-	if result := results[registration.QueryVLLMRequestRate]; result != nil {
+	// Process engine request completion rate (req/s) — throughput analyzer fallback λ_req
+	if result := results[registration.QueryRequestRate]; result != nil {
 		if !result.HasError() {
 			for _, value := range result.Values {
 				instanceKey, _, _ := c.buildInstanceKey(ctx, namespace, value.Labels)
@@ -823,7 +842,7 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 					continue // skip pods the KV/queue queries didn't see (scrape skew)
 				}
 				if !math.IsNaN(value.Value) && !math.IsInf(value.Value, 0) && value.Value >= 0 {
-					podData[instanceKey].vllmRequestRate = value.Value
+					podData[instanceKey].requestRate = value.Value
 				}
 			}
 		}
@@ -944,7 +963,7 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 			tokensInUse = int64(rounded)
 		}
 
-		// Look up MaxBatchSize from the scale target's vLLM args via the VA's ScaleTargetRef
+		// Look up MaxBatchSize from the scale target's engine args via the VA's ScaleTargetRef
 		var maxBatchSize int64
 		if va, ok := variantAutoscalings[variantKey]; ok && va != nil {
 			key := utils.GetNamespacedKey(namespace, va.Spec.ScaleTargetRef.Name)
@@ -954,7 +973,7 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 		}
 
 		if (data.hasKv || data.hasQueue) && !data.hasArrivalRate {
-			logger.Info("Pod has vLLM metrics but no dispatch rate — possible pod/pod_name label mismatch", "pod", podName, "model", modelID, "namespace", namespace)
+			logger.Info("Pod has engine metrics but no dispatch rate — possible pod/pod_name label mismatch", "pod", podName, "model", modelID, "namespace", namespace)
 		}
 
 		metric := interfaces.ReplicaMetrics{
@@ -979,7 +998,7 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 			AvgITL:                data.avgITL,
 			GenerationTokenRate:   data.generationTokenRate,
 			KvUsageInstant:        data.kvUsageInstant,
-			VLLMRequestRate:       data.vllmRequestRate,
+			RequestRate:           data.requestRate,
 			Metadata: &interfaces.ReplicaMetricsMetadata{
 				CollectedAt:     collectedAt,
 				Age:             0, // Fresh
@@ -1006,7 +1025,7 @@ func (c *ReplicaMetricsCollector) collectReplicaMetrics(
 
 // CollectSchedulerQueueMetrics collects model-level queue metrics from the
 // llm-d inference scheduler flow control layer. These metrics are not per-pod
-// but per-model, representing requests queued upstream before reaching vLLM.
+// but per-model, representing requests queued upstream before reaching the engine.
 // Returns nil (not an error) when flow control metrics are unavailable.
 func (c *ReplicaMetricsCollector) CollectSchedulerQueueMetrics(
 	ctx context.Context,

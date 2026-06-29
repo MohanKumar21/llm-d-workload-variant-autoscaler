@@ -21,8 +21,8 @@ type CapacityRecord struct {
 	BlockSize             int64
 	TotalKvCapacityTokens int64
 	EffectiveCapacity     int64
-	VLLMParams            *VLLMEngineParams // parsed deployment params for k2 derivation
-	LearnedFrom           string            // "live", "deployment", "annotation"
+	EngineParams          *EngineParams // parsed deployment params for k2 derivation
+	LearnedFrom           string        // "live", "deployment", "annotation"
 	LearnedAt             time.Time
 }
 
@@ -32,7 +32,7 @@ type CapacityRecord struct {
 // deployments before any live metrics are available.
 //
 // For cross-variant estimation, use FindCompatible which searches for records
-// from other variants with matching hardware and vLLM parameters.
+// from other variants with matching hardware and engine parameters.
 type CapacityKnowledgeStore struct {
 	mu      sync.RWMutex
 	records map[string]*CapacityRecord
@@ -81,9 +81,10 @@ func (s *CapacityKnowledgeStore) IsStale(namespace, modelID, variantName string)
 	return time.Since(rec.LearnedAt) > CapacityStalenessTimeout
 }
 
-// LoadFromScaleTarget parses vLLM args from a scale target and stores an
-// estimated capacity record for the variant. It does NOT overwrite an
-// existing "live" record — scale target-derived data is a fallback only.
+// LoadFromScaleTarget parses the engine args from a scale target (dispatching by
+// detected engine via ParseEngineArgs) and stores an estimated capacity record for
+// the variant. It does NOT overwrite an existing "live" record — scale
+// target-derived data is a fallback only.
 func (s *CapacityKnowledgeStore) LoadFromScaleTarget(namespace, modelID, variantName, accelerator string, gpuCount int, scaleTarget scaletarget.ScaleTargetAccessor) {
 	if scaleTarget == nil {
 		return
@@ -103,7 +104,7 @@ func (s *CapacityKnowledgeStore) LoadFromScaleTarget(namespace, modelID, variant
 	record := &CapacityRecord{
 		AcceleratorName: accelerator,
 		GpuCount:        gpuCount,
-		VLLMParams:      &params,
+		EngineParams:    &params,
 		LearnedFrom:     "deployment", // same for deployment and LWS
 		LearnedAt:       time.Now(),
 	}
@@ -148,13 +149,13 @@ func (s *CapacityKnowledgeStore) EvictStale(timeout time.Duration) int {
 
 // FindCompatible searches across all namespaces for a capacity record from
 // another variant with matching configuration: same model, accelerator type,
-// GPU count, and compatible vLLM parameters (as defined by IsCapacityCompatible).
-// Capacity is a property of hardware + vLLM config, not namespace, so
+// GPU count, and compatible engine parameters (as defined by IsCapacityCompatible).
+// Capacity is a property of hardware + engine config, not namespace, so
 // cross-namespace matching is intentional.
 //
 // Returns the best match (preferring "live" records over "deployment"/"lws" records),
 // or nil if no compatible record exists.
-func (s *CapacityKnowledgeStore) FindCompatible(modelID, accelerator string, gpuCount int, params *VLLMEngineParams) *CapacityRecord {
+func (s *CapacityKnowledgeStore) FindCompatible(modelID, accelerator string, gpuCount int, params *EngineParams) *CapacityRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -171,8 +172,8 @@ func (s *CapacityKnowledgeStore) FindCompatible(modelID, accelerator string, gpu
 			continue
 		}
 
-		// Must have compatible vLLM parameters
-		if rec.VLLMParams == nil || !rec.VLLMParams.IsCapacityCompatible(params) {
+		// Must have compatible engine parameters
+		if rec.EngineParams == nil || !rec.EngineParams.IsCapacityCompatible(params) {
 			continue
 		}
 

@@ -59,6 +59,21 @@ var _ = Describe("SGLang query registration", func() {
 		Expect(get(inferenceengine.EngineSGLang, QueryAvgTTFT).Template).To(ContainSubstring("sglang:time_to_first_token_seconds_sum"))
 		Expect(get(inferenceengine.EngineSGLang, QueryAvgITL).Template).To(ContainSubstring("sglang:inter_token_latency_seconds_sum"))
 		Expect(get(inferenceengine.EngineSGLang, QueryModelRequestCount).Template).To(ContainSubstring("sglang:num_requests_total"))
+
+		// Remaining engine-specific token/rate templates.
+		Expect(get(inferenceengine.EngineSGLang, QueryAvgOutputTokens).Template).To(ContainSubstring("sglang:generation_tokens_histogram_sum"))
+		Expect(get(inferenceengine.EngineSGLang, QueryAvgOutputTokens).Template).To(ContainSubstring("sglang:generation_tokens_histogram_count"))
+		Expect(get(inferenceengine.EngineSGLang, QueryAvgInputTokens).Template).To(ContainSubstring("sglang:prompt_tokens_histogram_sum"))
+		Expect(get(inferenceengine.EngineSGLang, QueryAvgInputTokens).Template).To(ContainSubstring("sglang:prompt_tokens_histogram_count"))
+		Expect(get(inferenceengine.EngineSGLang, QueryGenerationTokenRate).Template).To(ContainSubstring("sglang:generation_tokens_histogram_sum"))
+		Expect(get(inferenceengine.EngineSGLang, QueryRequestRate).Template).To(ContainSubstring("sglang:generation_tokens_histogram_count"))
+
+		// Prefix-cache hit rate is a ratio of two SGLang counters, each aggregated
+		// before the division so the extra cache_source label cannot break matching.
+		prefixCache := get(inferenceengine.EngineSGLang, QueryPrefixCacheHitRate).Template
+		Expect(prefixCache).To(ContainSubstring("sglang:cached_tokens_total"))
+		Expect(prefixCache).To(ContainSubstring("sglang:prompt_tokens_total"))
+		Expect(prefixCache).To(MatchRegexp(`sum by \([^)]*\) \(rate\(sglang:cached_tokens_total.*\) / sum by`))
 	})
 
 	It("keeps SGLang templates free of vllm:* metric names", func() {

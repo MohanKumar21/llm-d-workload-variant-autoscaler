@@ -85,9 +85,14 @@ func CollectModelRequestCount(
 	namespace string,
 	retentionPeriod time.Duration,
 ) (float64, error) {
-	// Defaults to vLLM for backward compatibility. Engine-aware scale-to-zero is
-	// wired via CollectModelRequestCountForEngine; see docs/proposals/sglang-backend.md
-	// (Phase 2) for threading the detected engine through the enforcer.
+	// Defaults to vLLM for backward compatibility: this queries
+	// vllm:request_success_total regardless of the model's actual engine. Engine-
+	// aware scale-to-zero is available via CollectModelRequestCountForEngine but is
+	// not yet threaded through the enforcer (see docs/proposals/sglang-backend.md
+	// Phase 2). Until it is, callers MUST NOT invoke scale-to-zero for non-vLLM
+	// models — the saturation engine gates this via scaleToZeroSupportedForEngines,
+	// since for SGLang this function would always return 0 (no vllm:* series) and
+	// the enforcer would incorrectly scale the model to zero.
 	return CollectModelRequestCountForEngine(ctx, metricsSource, inferenceengine.EngineVLLM, modelID, namespace, retentionPeriod)
 }
 

@@ -130,9 +130,9 @@ its metrics with `model_name`, matching the label WVA already filters on.
 | `queue_length` | `vllm:num_requests_waiting` | `sglang:num_queue_reqs` | Name swap |
 | `avg_ttft` | `vllm:time_to_first_token_seconds_{sum,count}` | `sglang:time_to_first_token_seconds_{sum,count}` | Histogram; name swap |
 | `avg_itl` | `vllm:inter_token_latency_seconds_{sum,count}` | `sglang:inter_token_latency_seconds_{sum,count}` | Histogram; name swap |
-| `avg_output_tokens` / `generation_token_rate` / `vllm_request_rate` | `vllm:request_generation_tokens_{sum,count}` | `sglang:generation_tokens_histogram_{sum,count}` | Histogram; name swap |
+| `avg_output_tokens` / `generation_token_rate` / `request_rate` | `vllm:request_generation_tokens_{sum,count}` | `sglang:generation_tokens_histogram_{sum,count}` | Histogram; name swap |
 | `avg_input_tokens` | `vllm:request_prompt_tokens_{sum,count}` | `sglang:prompt_tokens_histogram_{sum,count}` | Histogram; name swap |
-| `prefix_cache_hit_rate` | `vllm:prefix_cache_hits / vllm:prefix_cache_queries` | `rate(sglang:cached_tokens_total) / rate(sglang:prompt_tokens_total)` | **Structural.** SGLang also exposes `sglang:cache_hit_rate` directly, but its units (0–1 vs 0–100) are version-dependent; the token-counter ratio is unit-safe and parallels the vLLM formula |
+| `prefix_cache_hit_rate` | `vllm:prefix_cache_hits / vllm:prefix_cache_queries` | `sum by(...)(rate(sglang:cached_tokens_total)) / sum by(...)(rate(sglang:prompt_tokens_total))` | **Structural.** SGLang also exposes `sglang:cache_hit_rate` directly, but its units (0–1 vs 0–100) are version-dependent; the token-counter ratio is unit-safe and parallels the vLLM formula. Each counter is summed to the per-instance key before dividing because `cached_tokens_total` carries an extra `cache_source` label, which would otherwise break one-to-one vector matching |
 | `cache_config_info` (→ KV token capacity) | `vllm:cache_config_info{num_gpu_blocks,block_size}` → `num_gpu_blocks × block_size` | `sglang:max_total_num_tokens` (gauge) | **Structural.** SGLang exposes total KV token capacity directly |
 | `model_request_count` (scale-to-zero) | `vllm:request_success_total` | `sglang:num_requests_total` | Name swap |
 | `scheduler_dispatch_rate`, `scheduler_queue_size`, `scheduler_queue_bytes` | EPP `inference_extension_*` | (same) | Engine-agnostic; unchanged |

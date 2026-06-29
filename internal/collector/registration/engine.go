@@ -3,6 +3,7 @@
 // template variant registered under an engine-scoped name. Engine-agnostic
 // queries (e.g. the EPP scheduler flow-control queries) are registered once under
 // their bare logical name and shared across engines.
+
 package registration
 
 import (
@@ -13,6 +14,12 @@ import (
 // EngineSpecificQueries lists the logical query names whose metric source is the
 // inference engine (vLLM/SGLang), and which therefore have a per-engine template
 // variant. Any query not in this set is engine-agnostic and shared across engines.
+//
+// This is the authoritative list. The collector keeps a per-replica subset of it
+// (collector.engineSpecificReplicaQueries), which omits QueryModelRequestCount
+// (a scale-to-zero query). The two are kept from drifting by
+// TestEngineSpecificReplicaQueriesSubset: every entry in the collector's list
+// must appear here.
 var EngineSpecificQueries = []string{
 	QueryKvCacheUsage,
 	QueryQueueLength,
@@ -24,7 +31,7 @@ var EngineSpecificQueries = []string{
 	QueryAvgITL,
 	QueryGenerationTokenRate,
 	QueryKvUsageInstant,
-	QueryVLLMRequestRate,
+	QueryRequestRate,
 	QueryModelRequestCount,
 }
 

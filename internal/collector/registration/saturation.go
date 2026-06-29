@@ -28,7 +28,7 @@ func RegisterSaturationQueries(sourceRegistry *source.SourceRegistry) {
 
 	// KV cache usage per instance (peak over last minute)
 	// Uses max_over_time to catch saturation events between scrapes
-	// Preserves instance (IP:port for multi-vLLM pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
+	// Preserves instance (IP:port for multi-instance pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
 	registry.MustRegister(source.QueryTemplate{
 		Name:        QueryKvCacheUsage,
 		Type:        source.QueryTypePromQL,
@@ -39,7 +39,7 @@ func RegisterSaturationQueries(sourceRegistry *source.SourceRegistry) {
 
 	// Queue length per instance (peak over last minute)
 	// Uses max_over_time to catch burst traffic
-	// Preserves instance (IP:port for multi-vLLM pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
+	// Preserves instance (IP:port for multi-instance pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
 	registry.MustRegister(source.QueryTemplate{
 		Name:        QueryQueueLength,
 		Type:        source.QueryTypePromQL,
@@ -53,7 +53,7 @@ func RegisterSaturationQueries(sourceRegistry *source.SourceRegistry) {
 	// Cache config info per instance (static labels with block size and GPU blocks count)
 	// Uses max to deduplicate when multiple series exist per instance with different label combinations
 	// Used by Saturation Analyzer V2 for token capacity computation
-	// Preserves instance (IP:port for multi-vLLM pods), pod (for pod lookup), llm_d_ai_variant (for direct pod-to-VA mapping), and config labels
+	// Preserves instance (IP:port for multi-instance pods), pod (for pod lookup), llm_d_ai_variant (for direct pod-to-VA mapping), and config labels
 	//
 	// NOTE: vllm:cache_config_info is an info-style metric. Unlike vLLM's regular
 	// gauges/counters, it is NOT labeled with model_name — its label set is derived
@@ -73,7 +73,7 @@ func RegisterSaturationQueries(sourceRegistry *source.SourceRegistry) {
 
 	// Average output (generation) tokens per completed request
 	// Used for output-length-dependent k2 estimation
-	// Preserves instance (IP:port for multi-vLLM pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
+	// Preserves instance (IP:port for multi-instance pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
 	registry.MustRegister(source.QueryTemplate{
 		Name:        QueryAvgOutputTokens,
 		Type:        source.QueryTypePromQL,
@@ -84,7 +84,7 @@ func RegisterSaturationQueries(sourceRegistry *source.SourceRegistry) {
 
 	// Average input (prompt) tokens per completed request
 	// Used in k2 derivation formula: k2 = N_max × (I + O/2)
-	// Preserves instance (IP:port for multi-vLLM pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
+	// Preserves instance (IP:port for multi-instance pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
 	registry.MustRegister(source.QueryTemplate{
 		Name:        QueryAvgInputTokens,
 		Type:        source.QueryTypePromQL,
@@ -96,7 +96,7 @@ func RegisterSaturationQueries(sourceRegistry *source.SourceRegistry) {
 	// Prefix cache hit rate per instance (5m rate)
 	// Used to reduce estimated input token demand for scheduler-queued requests.
 	// Returns 0..1 where 1 means all prefix lookups were cache hits.
-	// Preserves instance (IP:port for multi-vLLM pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
+	// Preserves instance (IP:port for multi-instance pods), pod (for pod lookup), and llm_d_ai_variant (for direct pod-to-VA mapping)
 	registry.MustRegister(source.QueryTemplate{
 		Name:        QueryPrefixCacheHitRate,
 		Type:        source.QueryTypePromQL,
@@ -106,7 +106,7 @@ func RegisterSaturationQueries(sourceRegistry *source.SourceRegistry) {
 	})
 
 	// --- Scheduler flow control queries (model-level) ---
-	// These come from the llm-d inference scheduler, not vLLM pods.
+	// These come from the llm-d inference scheduler, not engine pods.
 	// They use target_model_name when available, falling back to model_name.
 	// The "or" clause handles cases where target_model_name is not set.
 	//
@@ -201,10 +201,17 @@ func registerSGLangSaturationQueries(registry *source.QueryList) {
 	// This is unit-safe (0.0-1.0) and parallels the vLLM hits/queries formula.
 	// SGLang also exposes sglang:cache_hit_rate directly, but its units are
 	// version-dependent (0-1 vs 0-100), so the counter ratio is preferred.
+	//
+	// Each counter is aggregated with sum by(...) BEFORE the division. The two
+	// counters do not share an identical label set — sglang:cached_tokens_total
+	// carries an extra cache_source label — so dividing the raw rates would leave
+	// the operator with no one-to-one matches and yield an empty vector. Summing
+	// each side down to the (instance, pod, llm_d_ai_variant) key first drops the
+	// differing labels and makes the division well-defined.
 	registerForEngine(registry, inferenceengine.EngineSGLang, source.QueryTemplate{
 		Name:        QueryPrefixCacheHitRate,
 		Type:        source.QueryTypePromQL,
-		Template:    `max by (instance, pod, llm_d_ai_variant) (rate(sglang:cached_tokens_total{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]) / rate(sglang:prompt_tokens_total{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]))`,
+		Template:    `sum by (instance, pod, llm_d_ai_variant) (rate(sglang:cached_tokens_total{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m])) / sum by (instance, pod, llm_d_ai_variant) (rate(sglang:prompt_tokens_total{namespace="{{.namespace}}",model_name="{{.modelID}}"}[5m]))`,
 		Params:      []string{source.ParamNamespace, source.ParamModelID},
 		Description: "Prefix cache hit rate per instance (0.0-1.0, 5m rate) (SGLang)",
 	})

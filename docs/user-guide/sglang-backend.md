@@ -55,7 +55,7 @@ The mapping:
 | Prompt tokens / request | `vllm:request_prompt_tokens_*` | `sglang:prompt_tokens_histogram_*` |
 | Generation tokens / request | `vllm:request_generation_tokens_*` | `sglang:generation_tokens_histogram_*` |
 | Prefix-cache hit rate | `vllm:prefix_cache_hits / _queries` | `sglang:cached_tokens_total / sglang:prompt_tokens_total` |
-| Request count (scale-to-zero) | `vllm:request_success_total` | `sglang:num_requests_total` |
+| Request count (scale-to-zero) | `vllm:request_success_total` | `sglang:num_requests_total` *(not yet enabled — see Caveats)* |
 
 > Make sure your Prometheus (or VictoriaMetrics) scrapes the SGLang pods' `/metrics`
 > endpoint, the same way you scrape vLLM. WVA only consumes metrics that are
@@ -85,6 +85,14 @@ map onto the same internal parameters as their vLLM counterparts:
   variant's pod is not supported.
 - **Metric availability.** SGLang must be started with metrics enabled so the
   `sglang:*` series are exposed and scraped.
+- **Scale-to-zero is not yet supported for SGLang.** Although the
+  `sglang:num_requests_total` mapping exists, the scale-to-zero enforcer still
+  queries the vLLM request counter, so WVA cannot yet detect idleness for an
+  SGLang model. To avoid erroneously scaling an active SGLang model to zero, WVA
+  **automatically skips scale-to-zero enforcement for any model that runs a
+  non-vLLM engine**, even if scale-to-zero is enabled in config. Engine-aware
+  scale-to-zero is tracked as Phase 2 in the
+  [design proposal](../proposals/sglang-backend.md).
 
 ## See also
 
