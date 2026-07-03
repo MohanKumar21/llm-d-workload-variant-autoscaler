@@ -99,7 +99,6 @@ export ACCELERATOR_TYPE="H100"              # GPU type (auto-detected)
 export GATEWAY_PROVIDER="istio"             # Gateway: istio or kgateway
 
 # Performance tuning (optional)
-export VLLM_MAX_NUM_SEQS=64                 # vLLM max concurrent sequences (batch size)
 export HPA_STABILIZATION_SECONDS=240        # HPA stabilization window
 ```
 
@@ -150,7 +149,6 @@ make deploy-wva-on-openshift
 ```bash
 export HF_TOKEN="hf_xxxxx"
 export MODEL_ID="unsloth/Meta-Llama-3.1-8B"
-export VLLM_MAX_NUM_SEQS=64         # Match desired max batch size
 make deploy-wva-on-openshift
 ```
 

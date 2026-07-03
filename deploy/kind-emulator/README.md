@@ -65,7 +65,6 @@ export ITL_AVERAGE_LATENCY_MS=20            # Average inter-token latency for th
 export TTFT_AVERAGE_LATENCY_MS=200          # Average time-to-first-token for the llm-d-inference-sim
 
 # Performance tuning (optional)
-export VLLM_MAX_NUM_SEQS=64                 # vLLM max concurrent sequences (batch size)
 export HPA_STABILIZATION_SECONDS=240        # HPA stabilization window
 
 # Image load (optional; auto-detected if unset)

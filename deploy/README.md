@@ -756,7 +756,6 @@ For rapid testing of autoscaling behavior, configure vLLM with a low `max-num-se
 
 ```bash
 # Deploy WVA infra, then tune vLLM max-num-seqs in the llm-d ModelService manifest
-export VLLM_MAX_NUM_SEQS=8
 make deploy-wva-on-k8s   # runs install.sh (WVA + monitoring + scaler + LWS)
 # Apply llm-d model serving manifests separately via kubectl apply or the llm-d guides
 ```
