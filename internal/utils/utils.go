@@ -370,6 +370,54 @@ func GetProductKeys() []string {
 	return slices.Sorted(maps.Keys(labels))
 }
 
+// GetDRAAwareGPUsPerReplica resolves the accelerator count for a scale target,
+// including exact-count DRA ResourceClaimTemplates and ResourceClaims when the
+// Kubernetes API can be queried. It falls back to the legacy accessor behavior
+// when DRA objects cannot be resolved.
+func GetDRAAwareGPUsPerReplica(ctx context.Context, c client.Reader, scaleTarget scaletarget.ScaleTargetAccessor) int {
+	if scaleTarget == nil {
+		return 1
+	}
+
+	leaderTemplate := scaleTarget.GetLeaderPodTemplateSpec()
+	leaderGPUs, err := resources.GetPodTemplateGPUs(ctx, c, scaleTarget.GetNamespace(), leaderTemplate)
+	if err != nil {
+		ctrl.LoggerFrom(ctx).V(logging.DEBUG).Info("Failed to resolve DRA resources for leader pod template; falling back to legacy GPU count",
+			"namespace", scaleTarget.GetNamespace(),
+			"scaleTarget", scaleTarget.GetName(),
+			"error", err)
+		return scaleTarget.GetTotalGPUsPerReplica()
+	}
+
+	groupSize := scaleTarget.GetGroupSize()
+	if groupSize <= 1 {
+		if leaderGPUs == 0 {
+			return 1
+		}
+		return leaderGPUs
+	}
+
+	workerTemplate := scaleTarget.GetWorkerPodTemplateSpec()
+	workerGPUs, err := resources.GetPodTemplateGPUs(ctx, c, scaleTarget.GetNamespace(), workerTemplate)
+	if err != nil {
+		ctrl.LoggerFrom(ctx).V(logging.DEBUG).Info("Failed to resolve DRA resources for worker pod template; falling back to legacy GPU count",
+			"namespace", scaleTarget.GetNamespace(),
+			"scaleTarget", scaleTarget.GetName(),
+			"error", err)
+		return scaleTarget.GetTotalGPUsPerReplica()
+	}
+
+	if leaderTemplate == workerTemplate {
+		leaderGPUs = 0
+	}
+
+	total := leaderGPUs + (int(groupSize)-1)*workerGPUs
+	if total == 0 {
+		return 1
+	}
+	return total
+}
+
 // GetAcceleratorNameFromScaleTarget extracts GPU product information from a scale target's nodeSelector or nodeAffinity.
 // GPU product information is checked against keys listed in constants.VendorResources.
 // If not found in nodeSelector or nodeAffinity, falls back to the AcceleratorNameLabel on the VariantAutoscaling.

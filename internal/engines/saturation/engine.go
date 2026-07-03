@@ -938,8 +938,9 @@ func (e *Engine) BuildVariantStates(
 			pendingReplicas = 0
 		}
 
-		// Extract GPUs per replica from scale target's pod template
-		gpusPerReplica := scaleTarget.GetTotalGPUsPerReplica()
+		// Extract GPUs per replica from scale target's pod template, including
+		// exact-count DRA ResourceClaimTemplates and ResourceClaims.
+		gpusPerReplica := utils.GetDRAAwareGPUsPerReplica(ctx, k8sClient, scaleTarget)
 
 		// Extract P/D role from scale target labels
 		role := getRoleFromScaleTarget(scaleTarget)

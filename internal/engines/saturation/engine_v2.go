@@ -42,7 +42,7 @@ func (e *Engine) runV2AnalysisOnly(
 		}
 		// Get accelerator name from scale target nodeSelector/nodeAffinity or VA label
 		accelerator := utils.GetAcceleratorNameFromScaleTarget(va, scaleTarget)
-		gpuCount := scaleTarget.GetTotalGPUsPerReplica()
+		gpuCount := utils.GetDRAAwareGPUsPerReplica(ctx, e.client, scaleTarget)
 		e.capacityStore.LoadFromScaleTarget(namespace, modelID, va.Name, accelerator, gpuCount, scaleTarget)
 		logger.V(logging.DEBUG).Info("Pre-populated capacity store from scale target",
 			"variant", va.Name, "accelerator", accelerator, "gpuCount", gpuCount)

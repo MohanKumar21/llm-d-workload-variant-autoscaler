@@ -29,3 +29,6 @@ package controller
 // InferencePool discovery and controller-owned ServiceMonitor observation.
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch
 // +kubebuilder:rbac:groups=inference.networking.x-k8s.io;inference.networking.k8s.io,resources=inferencepools,verbs=get;list;watch
+
+// DRA (Dynamic Resource Allocation) objects read for GPU accounting.
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses;resourceclaims;resourceclaimtemplates;resourceslices,verbs=get;list;watch

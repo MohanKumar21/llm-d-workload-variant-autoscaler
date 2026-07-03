@@ -7,6 +7,7 @@ import (
 
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/constants"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/metrics"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/resources"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -201,8 +202,13 @@ func (d *K8sWithGpuOperator) DiscoverUsage(ctx context.Context) (map[string]int,
 			continue
 		}
 
-		// Sum GPU requests from all containers
+		// Sum GPU requests from all containers and DRA claims.
 		gpuCount := getPodGPURequests(&pod)
+		draCount, err := resources.GetPodDRADeviceCount(ctx, d.Client, &pod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve DRA device requests for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+		gpuCount += draCount
 		if gpuCount > 0 {
 			usageByType[gpuType] += gpuCount
 		}
@@ -260,6 +266,7 @@ func getPodGPURequests(pod *corev1.Pod) int {
 				regularTotal += int(qty.Value())
 			}
 		}
+		regularTotal += resources.GetContainersDRAExtendedResources([]corev1.Container{container})
 	}
 
 	// Find max GPU request from init containers (run sequentially)
@@ -272,6 +279,7 @@ func getPodGPURequests(pod *corev1.Pod) int {
 				containerGPUs += int(qty.Value())
 			}
 		}
+		containerGPUs += resources.GetContainersDRAExtendedResources([]corev1.Container{container})
 		if containerGPUs > initMax {
 			initMax = containerGPUs
 		}

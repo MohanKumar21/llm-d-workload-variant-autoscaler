@@ -471,6 +471,25 @@ func TestGetPodGPURequests_MixedVendors(t *testing.T) {
 	assert.Equal(t, 6, result)
 }
 
+func TestGetPodGPURequests_DRAExtendedResource(t *testing.T) {
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "dra-container",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"deviceclass.resource.kubernetes.io/gpu.example.com": resource.MustParse("2"),
+					},
+				},
+			}},
+		},
+	}
+
+	result := getPodGPURequests(pod)
+
+	assert.Equal(t, 2, result)
+}
+
 func TestDiscover_EmptyCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))

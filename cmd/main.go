@@ -71,6 +71,7 @@ import (
 	"github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	inferencePoolV1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	inferencePoolV1alpha2 "sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
@@ -87,6 +88,7 @@ func init() {
 	utilruntime.Must(promoperator.AddToScheme(scheme))
 	utilruntime.Must(inferencePoolV1.Install(scheme))
 	utilruntime.Must(inferencePoolV1alpha2.Install(scheme))
+	utilruntime.Must(resourcev1.AddToScheme(scheme))
 	// KEDA scheme is registered unconditionally so the client can list ScaledObjects
 	// when the CRD is present. Listing fails gracefully (NoMatchError) when not installed.
 	utilruntime.Must(kedav1alpha1.AddToScheme(scheme))
