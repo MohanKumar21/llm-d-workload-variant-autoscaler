@@ -407,10 +407,10 @@ func GetDRAAwareGPUsPerReplica(ctx context.Context, c client.Reader, scaleTarget
 		return scaleTarget.GetTotalGPUsPerReplica()
 	}
 
-	if leaderTemplate == workerTemplate {
-		leaderGPUs = 0
-	}
-
+	// A leaderless group (nil LeaderTemplate) has leaderGPUs == workerGPUs because
+	// GetLeaderPodTemplateSpec falls back to the worker template. Size counts the
+	// leader, so total = leaderGPUs + (Size-1)*workerGPUs is correct in both the
+	// leaderless (N*workerGPUs) and distinct-leader cases.
 	total := leaderGPUs + (int(groupSize)-1)*workerGPUs
 	if total == 0 {
 		return 1

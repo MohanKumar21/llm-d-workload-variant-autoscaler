@@ -2,17 +2,22 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestGetPodTemplateGPUsResourceClaimTemplate(t *testing.T) {
@@ -126,10 +131,110 @@ func TestGetPodDRADeviceCountUsesAllocatedClaimStatus(t *testing.T) {
 		},
 	}
 
-	count, err := GetPodDRADeviceCount(ctx, c, pod)
+	count, err := GetPodDRADeviceCount(ctx, c, pod, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, 3, count)
+}
+
+func gpuResourceClaim(name string, count int64) *resourcev1.ResourceClaim {
+	return &resourcev1.ResourceClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: resourcev1.ResourceClaimSpec{
+			Devices: resourcev1.DeviceClaim{
+				Requests: []resourcev1.DeviceRequest{{
+					Name: "gpu",
+					Exactly: &resourcev1.ExactDeviceRequest{
+						DeviceClassName: "gpu.example.com",
+						Count:           count,
+					},
+				}},
+			},
+		},
+	}
+}
+
+func podWithNamedClaim(podName, claimName string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: "default"},
+		Spec: corev1.PodSpec{
+			ResourceClaims: []corev1.PodResourceClaim{{
+				Name:              "gpu",
+				ResourceClaimName: ptr.To(claimName),
+			}},
+		},
+	}
+}
+
+func TestGetPodDRADeviceCountNamedClaim(t *testing.T) {
+	c := newResourceClient(t, gpuResourceClaim("shared-gpu-claim", 2))
+	pod := podWithNamedClaim("pod", "shared-gpu-claim")
+
+	count, err := GetPodDRADeviceCount(context.Background(), c, pod, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+}
+
+func TestGetPodDRADeviceCountDedupesSharedNamedClaim(t *testing.T) {
+	c := newResourceClient(t, gpuResourceClaim("shared-gpu-claim", 2))
+	seen := map[string]bool{}
+
+	// Two pods reference the same named claim: it counts once, not twice.
+	first, err := GetPodDRADeviceCount(context.Background(), c, podWithNamedClaim("pod-a", "shared-gpu-claim"), seen)
+	require.NoError(t, err)
+	require.Equal(t, 2, first)
+
+	second, err := GetPodDRADeviceCount(context.Background(), c, podWithNamedClaim("pod-b", "shared-gpu-claim"), seen)
+	require.NoError(t, err)
+	require.Equal(t, 0, second)
+}
+
+func TestGetPodDRADeviceCountNotFoundIsZero(t *testing.T) {
+	// Claim referenced but absent: treated as zero, not an error.
+	c := newResourceClient(t)
+	pod := podWithNamedClaim("pod", "missing-claim")
+
+	count, err := GetPodDRADeviceCount(context.Background(), c, pod, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, 0, count)
+}
+
+func TestGetPodDRADeviceCountNoMatchIsZero(t *testing.T) {
+	// resource.k8s.io CRD not served (no REST mapping) -> NoMatchError -> zero.
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, resourcev1.AddToScheme(scheme))
+	c := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+			return &meta.NoResourceMatchError{PartialResource: schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims"}}
+		},
+	}).Build()
+	pod := podWithNamedClaim("pod", "some-claim")
+
+	count, err := GetPodDRADeviceCount(context.Background(), c, pod, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, 0, count)
+}
+
+func TestGetPodDRADeviceCountPropagatesOtherErrors(t *testing.T) {
+	// A non-NotFound Get error is wrapped and propagated.
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, resourcev1.AddToScheme(scheme))
+	c := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+			return apierrors.NewForbidden(schema.GroupResource{Group: "resource.k8s.io", Resource: "resourceclaims"}, "some-claim", errors.New("forbidden"))
+		},
+	}).Build()
+	pod := podWithNamedClaim("pod", "some-claim")
+
+	_, err := GetPodDRADeviceCount(context.Background(), c, pod, nil)
+
+	require.Error(t, err)
+	require.True(t, apierrors.IsForbidden(err))
 }
 
 func TestCountDRADeviceRequests(t *testing.T) {

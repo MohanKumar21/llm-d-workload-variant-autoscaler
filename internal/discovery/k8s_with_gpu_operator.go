@@ -6,12 +6,14 @@ import (
 	"os"
 
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/constants"
+	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/metrics"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/resources"
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/utils"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -186,6 +188,10 @@ func (d *K8sWithGpuOperator) DiscoverUsage(ctx context.Context) (map[string]int,
 	// Aggregate GPU requests by accelerator type
 	usageByType := make(map[string]int)
 
+	// Dedupe name-referenced ResourceClaims shared across pods so a shared claim
+	// is counted once, not once per referencing pod.
+	seenClaims := make(map[string]bool)
+
 	for _, pod := range podList.Items {
 		// Skip pods that aren't scheduled or are completed/failed
 		if pod.Spec.NodeName == "" {
@@ -204,9 +210,13 @@ func (d *K8sWithGpuOperator) DiscoverUsage(ctx context.Context) (map[string]int,
 
 		// Sum GPU requests from all containers and DRA claims.
 		gpuCount := getPodGPURequests(&pod)
-		draCount, err := resources.GetPodDRADeviceCount(ctx, d.Client, &pod)
+		// A transient API error or not-yet-propagated resource.k8s.io RBAC must not
+		// zero out usage for the whole cluster: degrade this pod's DRA contribution
+		// and keep going, matching the engine-side fallback in GetDRAAwareGPUsPerReplica.
+		draCount, err := resources.GetPodDRADeviceCount(ctx, d.Client, &pod, seenClaims)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve DRA device requests for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			ctrl.LoggerFrom(ctx).V(logging.DEBUG).Info("failed to resolve DRA device requests for pod; skipping its DRA contribution",
+				"namespace", pod.Namespace, "pod", pod.Name, "error", err)
 		}
 		gpuCount += draCount
 		if gpuCount > 0 {

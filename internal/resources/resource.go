@@ -34,8 +34,6 @@ import (
 	"github.com/llm-d/llm-d-workload-variant-autoscaler/internal/logging"
 )
 
-const draDeviceClassResourcePrefix = "deviceclass.resource.kubernetes.io/"
-
 // GetContainersGPUs returns the total GPU count across all containers
 func GetContainersGPUs(containers []corev1.Container) int {
 	total := 0
@@ -56,7 +54,7 @@ func GetContainersDRAExtendedResources(containers []corev1.Container) int {
 	total := 0
 	for _, container := range containers {
 		for name, qty := range container.Resources.Requests {
-			if strings.HasPrefix(string(name), draDeviceClassResourcePrefix) {
+			if strings.HasPrefix(string(name), resourcev1.ResourceDeviceClassPrefix) {
 				total += int(qty.Value())
 			}
 		}
@@ -86,20 +84,25 @@ func GetPodTemplateGPUs(ctx context.Context, c client.Reader, namespace string, 
 // GetPodDRADeviceCount returns the DRA device count for a concrete pod. When
 // claims have already been generated and allocated, allocation status is used
 // because it also covers allocationMode=All.
-func GetPodDRADeviceCount(ctx context.Context, c client.Reader, pod *corev1.Pod) (int, error) {
+//
+// seen, when non-nil, deduplicates claims by namespace/name across calls: a
+// name-referenced ResourceClaim shared by multiple pods (a legitimate DRA
+// pattern) is counted only for the first pod that references it. Pass nil to
+// count every pod independently.
+func GetPodDRADeviceCount(ctx context.Context, c client.Reader, pod *corev1.Pod, seen map[string]bool) (int, error) {
 	if pod == nil {
 		return 0, nil
 	}
-	return getPodSpecDRADeviceCount(ctx, c, pod.Namespace, &pod.Spec, pod.Status.ResourceClaimStatuses)
+	return getPodSpecDRADeviceCount(ctx, c, pod.Namespace, &pod.Spec, pod.Status.ResourceClaimStatuses, seen)
 }
 
 // GetPodSpecDRADeviceCount returns the exact-count DRA device count declared by
 // pod.spec.resourceClaims. Unsupported allocation modes contribute zero.
 func GetPodSpecDRADeviceCount(ctx context.Context, c client.Reader, namespace string, spec *corev1.PodSpec) (int, error) {
-	return getPodSpecDRADeviceCount(ctx, c, namespace, spec, nil)
+	return getPodSpecDRADeviceCount(ctx, c, namespace, spec, nil, nil)
 }
 
-func getPodSpecDRADeviceCount(ctx context.Context, c client.Reader, namespace string, spec *corev1.PodSpec, statuses []corev1.PodResourceClaimStatus) (int, error) {
+func getPodSpecDRADeviceCount(ctx context.Context, c client.Reader, namespace string, spec *corev1.PodSpec, statuses []corev1.PodResourceClaimStatus, seen map[string]bool) (int, error) {
 	if spec == nil || len(spec.ResourceClaims) == 0 {
 		return 0, nil
 	}
@@ -114,10 +117,27 @@ func getPodSpecDRADeviceCount(ctx context.Context, c client.Reader, namespace st
 		}
 	}
 
+	// alreadyCounted reports whether a concrete (allocated) claim has been counted
+	// already, so a shared name-referenced claim isn't summed once per pod.
+	alreadyCounted := func(name string) bool {
+		if seen == nil {
+			return false
+		}
+		key := namespace + "/" + name
+		if seen[key] {
+			return true
+		}
+		seen[key] = true
+		return false
+	}
+
 	total := 0
 	for _, podClaim := range spec.ResourceClaims {
 		switch {
 		case podClaim.ResourceClaimName != nil:
+			if alreadyCounted(*podClaim.ResourceClaimName) {
+				continue
+			}
 			count, err := getResourceClaimDeviceCount(ctx, c, namespace, *podClaim.ResourceClaimName)
 			if err != nil {
 				return total, err
@@ -125,6 +145,9 @@ func getPodSpecDRADeviceCount(ctx context.Context, c client.Reader, namespace st
 			total += count
 		case podClaim.ResourceClaimTemplateName != nil:
 			if generatedName := statusByName[podClaim.Name]; generatedName != "" {
+				if alreadyCounted(generatedName) {
+					continue
+				}
 				count, err := getResourceClaimDeviceCount(ctx, c, namespace, generatedName)
 				if err != nil {
 					return total, err
